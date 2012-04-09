@@ -4,6 +4,8 @@
  */
 package sse;
 
+import com.sun.jersey.spi.resource.Singleton;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
@@ -15,6 +17,7 @@ import javax.ws.rs.core.UriInfo;
  * @author mepcotterell
  */
 @Path("suggestion")
+@Singleton
 public class ServiceSuggestion {
 
     private static final Logger logger = Logger.getLogger(ServiceSuggestion.class.getName());
@@ -23,30 +26,41 @@ public class ServiceSuggestion {
     private UriInfo context;
 
     /**
-     * Creates a new instance of GenericResource
-     */
-    public ServiceSuggestion() {
-        // intentionally left blank
-    }
-
-    /**
      * test doc
      * @param format
      * @param direction
      * @return 
      */
     @GET 
-    @Path("get/{format}/{direction}")
+    @Path("get/jsonp/{direction}")
     @Consumes("text/html")
     @Produces("text/html")
-    public String getSuggestions (
-        @PathParam("format") String format,
-        @PathParam("direction") String direction
+    public String getSuggestionsJsonp (
+        @PathParam("direction")   String direction,
+        @QueryParam("desired")    String desired,
+        @QueryParam("candidates") String candidates,
+        @QueryParam("workflow")   String workflow,
+        @QueryParam("callback")   String callback
     ) {
-        if (format.equalsIgnoreCase("jsonp")) {
-            
+        
+        logger.log(Level.INFO, "getSuggestionsJsonp operation invoked.");
+        
+        if (candidates == null) {
+            logger.log(Level.WARNING, 
+                    "Query paramter 'candidates' required for this operation.");
         } // if
-        return direction + " suggestion, using " + format + " format!";
-    }
+        
+        if (workflow == null) {
+            logger.log(Level.WARNING, 
+                    "Query paramter 'workflow' required for this operation.");
+        } // if
+        
+        if (callback == null) {
+            logger.log(Level.WARNING, 
+                    "Query paramter 'callback' required for this operation.");
+        } // if
+        
+        return direction + " suggestion, using jsonp format! " + desired;
+    } // getSuggestionsJsonp
     
-}
+} // ServiceSuggestion
