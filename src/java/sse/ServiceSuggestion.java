@@ -29,12 +29,24 @@ public class ServiceSuggestion {
         // intentionally left blank
     }
 
+    /**
+     * test doc
+     * @param format
+     * @param direction
+     * @return 
+     */
     @GET 
-    @Path("test/{id}")
+    @Path("get/{format}/{direction}")
     @Consumes("text/html")
     @Produces("text/html")
-    public String testOp(@PathParam("id") String id) {
-        return "" + id;
+    public String getSuggestions (
+        @PathParam("format") String format,
+        @PathParam("direction") String direction
+    ) {
+        if (format.equalsIgnoreCase("jsonp")) {
+            
+        } // if
+        return direction + " suggestion, using " + format + " format!";
     }
     
 }
