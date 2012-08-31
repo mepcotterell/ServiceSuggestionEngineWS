@@ -7,6 +7,7 @@ package sse;
 import com.sun.jersey.spi.resource.Singleton;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.StringTokenizer;
 import java.util.logging.Level;
@@ -14,18 +15,22 @@ import java.util.logging.Logger;
 import javax.servlet.ServletContext;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
-import javax.ws.rs.core.UriInfo;
 import org.json.JSONArray;
+import sse.entity.Operation;
+import sse.entity.Service;
+import sse.entity.SuggestedOperation;
+import sse.entity.message.request.ServiceSuggestionRequest;
+import sse.entity.message.response.ServiceSuggestionResponse;
 import suggest.ForwardSuggest;
-import util.OpWsdl;
-import util.OpWsdlScore;
+import util.WebServiceOpr;
+import util.WebServiceOprScore;
 
 /**
  * REST Web Service for Service Suggestion Engine
  * This implementation is based on the JSR-311 specification.
  * @author mepcotterell
  */
-@Path("suggestion")
+@Path("serviceSuggestion")
 @Singleton
 public class ServiceSuggestion {
 
@@ -44,20 +49,19 @@ public class ServiceSuggestion {
         return String.format("$.wsextensions_error(\"The Service Suggestion Engine Web Service encountered an error on the server side. <pre>%s</pre>\");", error);
     } // wsExtensionsError
  
- 
-    private OpWsdl opFromEncodedString (String str) {
+    private WebServiceOpr opFromEncodedString (String str) {
         
         String[] tokens = str.split("@");
 
         if (tokens.length == 2) {
             String opName  = tokens[0];
             String opUrl   = tokens[1];
-            return new OpWsdl(opName, opUrl);
+            return new WebServiceOpr(opName, opUrl);
         } else if (tokens.length == 3) {
             String opName  = tokens[0];
             String opUrl   = tokens[1];
             String opExtra = tokens[2];
-            return new OpWsdl(opName, opUrl, opExtra);
+            return new WebServiceOpr(opName, opUrl, opExtra);
         } // if
         
         return null;
@@ -65,10 +69,10 @@ public class ServiceSuggestion {
     } // opFromEncodedString
     
     @GET 
-    @Path("get/jsonp/{direction}")
+    @Path("get/json/{direction}")
     @Consumes("text/html")
     @Produces("application/json")
-    public String getSuggestionsJSONP (
+    public String getJSON (
         @PathParam("direction")   String direction,
         @QueryParam("desired")    String desired,
         @QueryParam("candidates") String candidates,
@@ -94,7 +98,7 @@ public class ServiceSuggestion {
         JSONArray suggestions = new JSONArray();
         
         // A list to hold the candidate operations
-        List<OpWsdl> candidateOps = new ArrayList<OpWsdl>();
+        List<WebServiceOpr> candidateOps = new ArrayList<WebServiceOpr>();
         
         if (candidates != null) {
             
@@ -103,7 +107,7 @@ public class ServiceSuggestion {
            while (opTokens.hasMoreTokens()) {
                
                String next = opTokens.nextToken();
-               OpWsdl op = opFromEncodedString(next);
+               WebServiceOpr op = opFromEncodedString(next);
                
                if (op != null) {
                    candidateOps.add(op);
@@ -114,7 +118,7 @@ public class ServiceSuggestion {
         } // if
         
         // A list to hold the workflow operations
-        List<OpWsdl> workflowOps = new ArrayList<OpWsdl>();
+        List<WebServiceOpr> workflowOps = new ArrayList<WebServiceOpr>();
         
         if (workflow != null) {
             
@@ -123,7 +127,7 @@ public class ServiceSuggestion {
            while (opTokens.hasMoreTokens()) {
                
                String next = opTokens.nextToken();
-               OpWsdl op = opFromEncodedString(next);
+               WebServiceOpr op = opFromEncodedString(next);
                
                if (op != null) {
                    workflowOps.add(op);
@@ -134,9 +138,9 @@ public class ServiceSuggestion {
         } // if
         
         // Filter out stuff from the candidates that already exist in the workflow
-        List <OpWsdl> toDelete = new ArrayList<OpWsdl>();
-        for (OpWsdl opA: candidateOps) {
-            for (OpWsdl opB: workflowOps) {
+        List <WebServiceOpr> toDelete = new ArrayList<WebServiceOpr>();
+        for (WebServiceOpr opA: candidateOps) {
+            for (WebServiceOpr opB: workflowOps) {
                 if (opA.compareTo(opB)) {
                     toDelete.add(opA);
                 } // if
@@ -145,15 +149,14 @@ public class ServiceSuggestion {
         candidateOps.removeAll(toDelete);
         
         ForwardSuggest sugg = new ForwardSuggest();
-        List<OpWsdlScore> suggestOpList = sugg.getSuggestServices(workflowOps, candidateOps, desired, this.context.getRealPath("WEB-INF/owl/obi.owl"), null);
-        
+        List<WebServiceOprScore> suggestOpList = sugg.suggestNextService(workflowOps, candidateOps, desired, this.context.getRealPath("WEB-INF/owl/obi.owl"), null);
         
         DecimalFormat df = new DecimalFormat("0.000");
         
-        for (OpWsdlScore score: suggestOpList){
+        for (WebServiceOprScore score: suggestOpList){
             String [] suggestion = {
-                score.getOpName(), 
-                score.getWsdlName(), 
+                score.getOperationName(), 
+                score.getWsDescriptionDoc(), 
                 df.format(score.getScore()),
                 df.format(score.getDmScore()),
                 df.format(score.getFnScore()),
@@ -164,38 +167,60 @@ public class ServiceSuggestion {
         } // for
         
         // return the JSON array wrapped with the callback function
-        return String.format("%s(\"%s\");", callback, suggestions.toString());
+        if (callback == null) {
+            return String.format("%s", callback, suggestions.toString());
+        } else {
+            return String.format("%s(%s);", callback, suggestions.toString());
+        }
         
     } // getSuggestionsJsonp
     
-    @GET 
+    @POST 
     @Path("get/xml/{direction}")
-    @Consumes("text/html")
-    @Produces("application/xml")
-    public String getSuggestionsXML (
+    @Consumes({"application/xml", "text/xml"})
+    @Produces({"application/xml", "text/xml"})
+    public ServiceSuggestionResponse getXML (
         @PathParam("direction")   String direction,
-        @QueryParam("desired")    String desired,
-        @QueryParam("candidates") String candidates,
-        @QueryParam("workflow")   String workflow,
-        @QueryParam("callback")   String callback
+        ServiceSuggestionRequest  request
     ) {
         
-        logger.log(Level.INFO, "getSuggestionsXML operation invoked.");
+        List<WebServiceOpr> candidateOps = new ArrayList<WebServiceOpr>();
+        for (Operation o : request.candiates) {
+            candidateOps.add(new WebServiceOpr(o.operationName, o.service.descriptionDocument));
+        }
         
-        if (candidates == null) {
-            return wsExtensionsErrorJson("Query paramter 'candidates' required for this operation.");
-        } // if
+        List<WebServiceOpr> workflowOps  = new ArrayList<WebServiceOpr>();
+        for (Operation o : request.workflow) {
+            workflowOps.add(new WebServiceOpr(o.operationName, o.service.descriptionDocument));
+        }
         
-        if (workflow == null) {
-            return wsExtensionsErrorJson("Query paramter 'workflow' required for this operation.");
-        } // if
+        ForwardSuggest sugg = new ForwardSuggest();
+        List<WebServiceOprScore> suggestOpList = sugg.suggestNextService(workflowOps, candidateOps, request.desiredFunctionality, this.context.getRealPath("WEB-INF/owl/obi.owl"), null);
         
-        if (callback == null) {
-            return wsExtensionsErrorJson("Query paramter 'callback' required for this operation.");
-        } // if
+        List<SuggestedOperation> operations = new ArrayList<SuggestedOperation>();
+        for (WebServiceOprScore o : suggestOpList) {
+            
+            Service s = new Service();
+            s.setDescriptionDocument(o.getWsDescriptionDoc());
+            
+            SuggestedOperation so = new SuggestedOperation();
+            so.setService(s);
+            so.setOperationName(o.getOperationName());
+            so.setScore(o.getScore());
+            so.setDataMediationScore(o.getDmScore());
+            so.setFunctionalityScore(o.getFnScore());
+            so.setPreconditionEffectScore(o.getPeScore());
+            
+            operations.add(so);
+        }
         
-        return direction + " suggestion, using jsonp format! " + desired;
+        Collections.sort(operations);
         
-    } // getSuggestionsXML
+        ServiceSuggestionResponse response = new ServiceSuggestionResponse();
+        response.setOperations(operations);
+        
+        return response;
+        
+    } // getXML
     
 } // ServiceSuggestion
